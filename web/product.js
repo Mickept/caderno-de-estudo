@@ -228,7 +228,7 @@ function auth() {
 
 /** @type {[string, [string, string][]][]} */
 const navigation = [
-  ['Organizar', [['today', 'Hoje'], ['courses', 'Cadeiras'], ['files', 'Materiais']]],
+  ['Organizar', [['today', 'Hoje'], ['courses', 'Cadeiras'], ['files', 'Materiais'], ['notes', 'Apontamentos']]],
   ['Estudar', [['explain', 'Explicações'], ['cards', 'Flashcards'], ['practice', 'Treino'], ['revision', 'Revisão'], ['exam', 'Simulado'], ['focus', 'Foco']]],
 ];
 const navButton = (id, label) => `<button data-screen="${id}" ${screen === id || (id === 'files' && screen === 'detail') ? 'aria-current="page"' : ''}>${label}</button>`;
@@ -360,6 +360,38 @@ function groupBySection(list) {
     groups.get(path).push(file);
   }
   return [...groups.entries()];
+}
+
+// Apontamentos: notas do aluno e resumos por tema (criados à mão ou pela IA).
+let selectedNote = null;
+function notes() {
+  const courses = state.courses.filter((course) => course.selected);
+  const course = courses.find((item) => item.id === selectedCourse) || courses[0];
+  selectedCourse = course?.id || null;
+  const list = (state.notes || []).filter((note) => note.course_id === selectedCourse);
+  const current = selectedNote === 'new' ? { id: '', title: '', body: '', kind: 'nota', section_path: '' } : list.find((note) => note.id === selectedNote) || null;
+  const sections = [...new Set(state.files.filter((file) => file.course_id === selectedCourse && file.section_path).flatMap((file) => {
+    const parts = file.section_path.split('/');
+    return parts.map((_, index) => parts.slice(0, index + 1).join('/'));
+  }))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const canAi = state.ai?.consented && state.ai?.configured;
+  const picker = course ? `<label class="inline-select">Cadeira<select id="note-course">${courses.map((c) => `<option value="${c.id}" ${c.id === selectedCourse ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>` : '';
+  shell(`${pageHead('Apontamentos', 'As tuas notas e os resumos de cada tema, por cadeira.', picker)}
+    ${!course ? '<div class="notice"><p><strong>Escolhe primeiro uma cadeira.</strong></p><button class="primary" data-screen="courses">Adicionar cadeiras</button></div>' : `
+    <div class="split split-wide"><section class="panel"><div class="panel-head"><h2>${esc(course.name)}</h2><button class="primary" data-action="note-new">Novo apontamento</button></div>
+      ${list.length ? `<ul class="materials">${list.map((note) => `<li class="material-item"><div class="material-title"><button class="title-button" data-note="${note.id}" ${note.id === selectedNote ? 'aria-current="true"' : ''}>${esc(note.title)}</button></div>
+        <p class="meta">${note.kind === 'resumo' ? 'Resumo' : 'Nota'}${note.section_path ? ` · ${esc(note.section_path.split('/').pop())}` : ''} · ${new Date(note.updated_at * 1000).toLocaleDateString('pt-PT')}</p></li>`).join('')}</ul>`
+        : '<p class="empty">Ainda não tens apontamentos nesta cadeira.</p>'}
+      ${current ? `<form id="note-form" class="stack"><input type="hidden" name="id" value="${esc(current.id)}"><input type="hidden" name="sectionPath" value="${esc(current.section_path || '')}">
+        <label>Título<input name="title" required maxlength="140" value="${esc(current.title)}"></label>
+        <label>Texto<textarea name="body" rows="16" maxlength="60000" placeholder="Escreve à vontade. Usa ## para títulos e - para listas.">${esc(current.body)}</textarea></label>
+        <div class="row"><button class="primary">Guardar</button>${current.id ? '<button type="button" data-action="note-delete" data-id="' + esc(current.id) + '">Apagar</button>' : ''}</div></form>
+        ${current.id && current.body ? `<h3>Pré-visualização</h3><div class="answer prose">${md(current.body, [])}</div>` : ''}` : ''}</section>
+    <div class="stack"><section class="panel"><h2>Resumir um tema</h2><p class="muted">A IA lê os materiais do tema (e dos subtemas) e cria um resumo com ideias, conceitos e perguntas para te testares. Fica guardado aqui, e podes editá-lo.</p>
+      ${canAi ? (sections.length ? `<form id="note-summary-form"><label>Tema<select name="section">${sections.map((section) => `<option value="${esc(section)}">${esc(section.split('/').map((part) => part.slice(0, 40)).join(' › '))}</option>`).join('')}</select></label>
+        <button class="primary">Resumir com IA</button></form>${busy.has('note-summary') ? loadingBlock('A ler os materiais do tema e a escrever o resumo…', 'note-summary', 4) : ''}`
+        : '<p class="hint">Ainda não há materiais organizados por tema. Sincroniza o Moodle primeiro.</p>')
+        : '<p class="hint">Configura a IA nas Definições para criar resumos automáticos.</p>'}</section></div></div>`}`);
 }
 
 function files() {
@@ -763,6 +795,7 @@ function render() {
   if (screen === 'guide' || !state.onboarded) return onboarding();
   if (screen === 'courses') return courses();
   if (screen === 'files') return files();
+  if (screen === 'notes') return notes();
   if (screen === 'detail') return detail();
   if (screen === 'explain') return explanations();
   if (screen === 'cards') return cards();
@@ -798,6 +831,11 @@ async function action(target) {
     finally { target.disabled = false; }
   } else if (name === 'dismiss-alerts') {
     await post('/api/alerts/ack', { ids: [...sessionAlerts.keys()] }); sessionAlerts.clear(); await refresh();
+  } else if (name === 'note-new') {
+    selectedNote = 'new'; render();
+  } else if (name === 'note-delete') {
+    if (!confirm('Apagar este apontamento?')) return;
+    await post('/api/notes/delete', { id: target.dataset.id }); selectedNote = null; await refresh();
   } else if (name === 'seen') {
     await post('/api/seen', {}); await refresh();
   } else if (name === 'reveal') {
@@ -900,14 +938,16 @@ async function requestExplanation(label, question) {
 }
 
 document.addEventListener('click', async (event) => {
-  const target = event.target instanceof Element ? event.target.closest('[data-action],[data-screen],[data-file],[data-study],[data-card],[data-analyze],[data-quiz],[data-favorite-file],[data-explain-prompt],[data-explain-topic],[data-explain-file],[data-practice-grade],[data-focus-grade],[data-exam-grade],[data-open-file],[data-guide-step]') : null;
+  const target = event.target instanceof Element ? event.target.closest('[data-note],[data-action],[data-screen],[data-file],[data-study],[data-card],[data-analyze],[data-quiz],[data-favorite-file],[data-explain-prompt],[data-explain-topic],[data-explain-file],[data-practice-grade],[data-focus-grade],[data-exam-grade],[data-open-file],[data-guide-step]') : null;
   if (!target) return;
   if (!(target instanceof HTMLElement)) return;
   event.preventDefault();
   // Qualquer botão que espere pelo servidor mostra que está a trabalhar (o CSS só o mostra após um instante).
   if (target instanceof HTMLButtonElement) target.setAttribute('aria-busy', 'true');
   try {
-    if (target.dataset.guideStep) {
+    if (target.dataset.note) {
+      selectedNote = target.dataset.note; render();
+    } else if (target.dataset.guideStep) {
       guideStep = Number(target.dataset.guideStep); render();
     } else if (target.dataset.openFile) {
       await post('/api/open-file', { fileId: target.dataset.openFile, reveal: target.dataset.reveal === 'true' });
@@ -1025,6 +1065,14 @@ document.addEventListener('submit', async (event) => {
       flash('Chave guardada. A testar…');
       try { await post('/api/ai-test', {}); flash('Chave guardada e testada: a IA está a responder.'); }
       catch (error) { flash(`Chave guardada, mas o teste falhou. ${error.message}`); }
+    } else if (form.id === 'note-form') {
+      const result = await post('/api/notes', { id: data.get('id') || null, courseId: selectedCourse, title: data.get('title'), body: data.get('body'), sectionPath: data.get('sectionPath') || null });
+      selectedNote = result.id; await refresh(); flash('Apontamento guardado.');
+    } else if (form.id === 'note-summary-form') {
+      await whileBusy('note-summary', async () => {
+        const result = await post('/api/notes/summarize', { courseId: selectedCourse, sectionPath: data.get('section') });
+        selectedNote = result.id; await refresh();
+      });
     } else if (form.id === 'ask-form') {
       answer = null;
       await whileBusy('ask', async () => { answer = await post('/api/ask', { courseId: selectedCourse, question: data.get('question') }); });
@@ -1074,7 +1122,7 @@ document.addEventListener('change', async (event) => {
       if (input instanceof HTMLInputElement) input.placeholder = value || 'ID do modelo';
     }
   }
-  if (event.target instanceof HTMLSelectElement && event.target.id === 'file-course') { selectedCourse = event.target.value; render(); }
+  if (event.target instanceof HTMLSelectElement && (event.target.id === 'file-course' || event.target.id === 'note-course')) { selectedCourse = event.target.value; selectedNote = null; render(); }
   if (event.target instanceof HTMLSelectElement && event.target.id === 'explain-course') {
     explanationCourse = event.target.value; explanationFile = null; explanationAnswer = null; explanationError = null; render();
   }

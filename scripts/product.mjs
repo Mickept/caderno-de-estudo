@@ -9,7 +9,8 @@ import { randomBytes } from 'node:crypto';
 import { id, hash, passwordHash, passwordMatches, encryptToken, newSession, sessionUser, sessionCookie } from '../lib/product-security.mjs';
 import { assertFunctions, storeFile, supportedDocument, syncUser } from '../lib/product-sync.mjs';
 import { dailyPlan } from '../lib/product-plan.mjs';
-import { analyzeFile, askCourse } from '../lib/product-ai.mjs';
+import { saveNote, deleteNote, listNotes } from '../lib/notes.mjs';
+import { analyzeFile, askCourse, summarizeSection } from '../lib/product-ai.mjs';
 import { aiSettings, aiConfigured, saveAiSettings, deleteAiSettings, testAi } from '../lib/product-ai-provider.mjs';
 import { callWs, baseUrl, loginWithPassword, nomeLimpo, startSsoLogin, tokenFromSsoUrl } from '../lib/moodle.mjs';
 
@@ -163,7 +164,7 @@ function state(user) {
     materialsDir: desktop ? resolve(PRODUCT_FILES_DIR) : undefined, dataDir: desktop ? dirname(resolve(PRODUCT_DB_PATH)) : undefined, onboarded: !!preference?.onboarded_at,
     analysis: { pending: Number(pendingAnalysis), running: activeAnalysis.has(user.id) },
     ai: { configured: aiConfigured(db, user.id), settings: aiSettings(db, user.id), consented: !!preference?.ai_consent_at },
-    alerts: pendingAlerts(db, user.id), plan: dailyPlan(db, user.id), changesSince: preference?.last_seen_at || null };
+    alerts: pendingAlerts(db, user.id), notes: listNotes(db, user.id), plan: dailyPlan(db, user.id), changesSince: preference?.last_seen_at || null };
 }
 
 // Contas com SSO (entrada pela página da instituição, Microsoft ou Google) não têm palavra-passe
@@ -402,6 +403,21 @@ const routes = {
     db.prepare('UPDATE courses SET exam_at=? WHERE id=? AND user_id=?').run(parsed ? Math.floor(parsed / 1000) : null, data.courseId, user.id);
     send(res, { ok: true });
   },
+  'POST /api/notes': async (req, res) => {
+    const user = requireUser(req);
+    const data = await jsonBody(req);
+    send(res, { id: saveNote(db, user.id, { id: data.id || null, courseId: data.courseId, title: data.title, body: data.body, sectionPath: data.sectionPath || null }) });
+  },
+  'POST /api/notes/delete': async (req, res) => {
+    const user = requireUser(req);
+    const data = await jsonBody(req);
+    send(res, { ok: deleteNote(db, user.id, String(data.id || '')) });
+  },
+  'POST /api/notes/summarize': async (req, res) => {
+    const user = requireUser(req);
+    const data = await jsonBody(req);
+    send(res, await queueAi(user.id, () => summarizeSection(db, user.id, data.courseId, data.sectionPath)));
+  },
   'POST /api/alerts/ack': async (req, res) => {
     const user = requireUser(req);
     const data = await jsonBody(req);
@@ -598,10 +614,11 @@ export const server = createServer(async (req, res) => {
       const path = insideUserFiles(user.id, file.path);
       const pdf = file.mime === 'application/pdf';
       const html = file.mime === 'text/html';
-      const media = /^(video|audio)\//.test(file.mime);
+      const mime = String(file.mime);
+      const media = /^(video|audio)\//.test(mime);
       const encodedName = encodeURIComponent(String(file.filename)).replace(/['()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
       const inline = pdf || html || media;
-      const headers = { 'content-type': inline ? file.mime : 'application/octet-stream',
+      const headers = { 'content-type': inline ? mime : 'application/octet-stream',
         'content-disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodedName}`,
         'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' };
       // HTML do Moodle nunca corre scripts nem liga à rede.

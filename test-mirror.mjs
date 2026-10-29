@@ -81,5 +81,27 @@ try {
   assert.equal(db.prepare('SELECT count(*) n FROM files').get().n, 3);
   assert.equal(db.prepare("SELECT count(*) n FROM deadlines WHERE source='puc'").get().n, 2);
   assert.equal(db.prepare("SELECT count(*) n FROM deadlines WHERE kind='teste'").get().n, 1, 'evento "open" ignorado');
+  // Apontamentos e resumo de tema (IA simulada)
+  const { saveNote, deleteNote, listNotes } = await import('./lib/notes.mjs');
+  const { saveAiSettings } = await import('./lib/product-ai-provider.mjs');
+  const { summarizeSection } = await import('./lib/product-ai.mjs');
+  const noteId = saveNote(db, 'u', { courseId: 'c1', title: 'A minha nota', body: '## Ideia\n- x' });
+  saveNote(db, 'u', { id: noteId, courseId: 'c1', title: 'A minha nota', body: 'editada' });
+  assert.equal(listNotes(db, 'u')[0].body, 'editada');
+  assert.throws(() => saveNote(db, 'outro', { courseId: 'c1', title: 't', body: '' }), /não encontrada/);
+  await assert.rejects(() => summarizeSection(db, 'u', 'c1', '1 - Tema 1 - Introdução'), /Ativa a análise/);
+  db.prepare("INSERT INTO preferences(user_id,ai_consent_at) VALUES('u',1) ON CONFLICT(user_id) DO UPDATE SET ai_consent_at=1").run();
+  saveAiSettings(db, 'u', { provider: 'openai', apiKey: 'chave-de-teste-123', summaryModel: 'm', explainModel: 'm' });
+  db.prepare("UPDATE files SET text='Livro do tema com conteúdo suficiente para resumir.',text_status='ok' WHERE item_number='1.1.1'").run();
+  const realFetch = globalThis.fetch; let prompt = '';
+  globalThis.fetch = async (url, options) => { if (String(url).includes('openai')) { prompt = options.body;
+    return new Response(JSON.stringify({ output_text: '## Ideias principais\n- tudo (1.1.1)', usage: {} }), { status: 200 }); } return realFetch(url, options); };
+  try {
+    const summary = await summarizeSection(db, 'u', 'c1', '1 - Tema 1 - Introdução');
+    assert.ok(prompt.includes('1.1.1') && summary.body.includes('Ideias principais'));
+    assert.equal(listNotes(db, 'u').find((n) => n.id === summary.id).kind, 'resumo');
+    await assert.rejects(() => summarizeSection(db, 'u', 'c1', '7 - Inexistente'), /ainda não tem materiais/);
+  } finally { globalThis.fetch = realFetch; }
+  assert.equal(deleteNote(db, 'u', noteId), true);
   console.log('test-mirror ok');
 } finally { server.close(); }

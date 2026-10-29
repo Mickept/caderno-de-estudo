@@ -17,6 +17,14 @@ Fork de https://github.com/miguelaopt/caderno (ver LICENSE, mantida) para a UAB 
 - Avisa quando aparece um **prazo novo** e depois a **7 dias, 48 horas e no próprio dia**. Os avisos ficam em *Hoje* até carregares em "Percebi" e saem também como notificação do sistema.
 - A primeira sincronização de uma cadeira não avisa de tudo de uma vez. A app reavalia os avisos de 15 em 15 minutos enquanto estiver aberta (as notificações precisam da app aberta).
 
+## Fase 3: apontamentos e resumos por tema
+- Página **Apontamentos**: notas tuas por cadeira (texto simples com `##` e `-`, com pré-visualização).
+- **Resumir um tema com IA**: escolhes um tema (ou subtema) e a IA lê os materiais dele e escreve ideias principais, conceitos, o que não esquecer e perguntas para te testares. Fica guardado como apontamento editável.
+- Precisa de chave de IA nas Definições (Anthropic/Claude, OpenAI, DeepSeek, Groq...). É uma chave de API, diferente da subscrição Claude.ai.
+
+## Instalar no Windows
+Ver INSTALAR-WINDOWS.md.
+
 ## Executar
     npm ci
     npm start                      # abre http://localhost:<porta> (indica MOODLE_URL=https://elearning.uab.pt)
@@ -25,8 +33,7 @@ Fork de https://github.com/miguelaopt/caderno (ver LICENSE, mantida) para a UAB 
     npm run desktop:dist:linux     # AppImage (corre no Linux)
     npm test
 
-## Próximas fases (a fase 2 já está feita)
-3. Resumos e apontamentos por cadeira, também para páginas/livros (já são analisados como os PDFs).
+## Próximas fases (fases 1, 2 e 3 feitas)
 4. Conversa com o Claude sobre a matéria. Usa a chave de API do utilizador (a do Caderno), que é separada da subscrição Claude.ai.
 
 Não testado contra o Moodle real da UAB; o PUC deve ser sempre confirmado.
