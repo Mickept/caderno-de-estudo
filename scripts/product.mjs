@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createServer } from 'node:http';
 import { createReadStream } from 'node:fs';
-import { readFile, rm, writeFile } from 'node:fs/promises';
+import { readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { resolve, join, relative, isAbsolute, sep, dirname } from 'node:path';
 import { openProductDb, PRODUCT_DB_PATH, PRODUCT_FILES_DIR } from '../lib/product-db.mjs';
 import { randomBytes } from 'node:crypto';
@@ -135,9 +135,9 @@ async function analyzePending(userId) {
 function state(user) {
   const courses = db.prepare('SELECT id,name,shortname,selected,source,exam_at,last_synced_at FROM courses WHERE user_id=? ORDER BY selected DESC,name').all(user.id);
   const files = db.prepare(`SELECT f.id,f.course_id,f.filename,f.mime,f.size,f.text_status,length(f.text) AS text_chars,
-    json_array_length(f.pages_json) AS page_count,f.source,f.first_seen_at,f.changed_at,f.favorite,a.summary,a.topics_json
+    json_array_length(f.pages_json) AS page_count,f.source,f.first_seen_at,f.changed_at,f.favorite,f.section_path,f.item_number,a.summary,a.topics_json
     FROM files f LEFT JOIN analyses a ON a.file_id=f.id AND a.hash=f.hash WHERE f.user_id=? ORDER BY f.changed_at DESC`).all(user.id);
-  const deadlines = db.prepare('SELECT id,course_id,title,kind,due_at,source FROM deadlines WHERE user_id=? AND due_at>? ORDER BY due_at LIMIT 30').all(user.id, now());
+  const deadlines = db.prepare('SELECT id,course_id,title,kind,due_at,source,note FROM deadlines WHERE user_id=? AND due_at>? ORDER BY due_at LIMIT 30').all(user.id, now());
   for (const course of courses) if (course.exam_at && Number(course.exam_at) > now())
     deadlines.push({ id: `exam-${course.id}`, course_id: course.id, title: `Exame de ${course.name}`, kind: 'exame', due_at: course.exam_at, source: 'manual' });
   deadlines.sort((a, b) => Number(a.due_at) - Number(b.due_at));
@@ -590,10 +590,25 @@ export const server = createServer(async (req, res) => {
       if (!file?.path) return send(res, { erro: 'Ficheiro não encontrado.' }, 404);
       const path = insideUserFiles(user.id, file.path);
       const pdf = file.mime === 'application/pdf';
+      const html = file.mime === 'text/html';
+      const media = /^(video|audio)\//.test(file.mime);
       const encodedName = encodeURIComponent(String(file.filename)).replace(/['()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
-      res.writeHead(200, { 'content-type': pdf ? 'application/pdf' : 'application/octet-stream',
-        'content-disposition': `${pdf ? 'inline' : 'attachment'}; filename*=UTF-8''${encodedName}`,
-        'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' });
+      const inline = pdf || html || media;
+      const headers = { 'content-type': inline ? file.mime : 'application/octet-stream',
+        'content-disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodedName}`,
+        'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' };
+      // HTML do Moodle nunca corre scripts nem liga à rede.
+      if (html) headers['content-security-policy'] = "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'";
+      const size = (await stat(path)).size;
+      const range = media && /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+      if (range && (range[1] || range[2])) {
+        const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
+        const end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+        if (start > end || start >= size) { res.writeHead(416, { 'content-range': `bytes */${size}` }); return res.end(); }
+        res.writeHead(206, { ...headers, 'accept-ranges': 'bytes', 'content-range': `bytes ${start}-${end}/${size}`, 'content-length': end - start + 1 });
+        return createReadStream(path, { start, end }).pipe(res);
+      }
+      res.writeHead(200, media ? { ...headers, 'accept-ranges': 'bytes', 'content-length': size } : headers);
       return createReadStream(path).pipe(res);
     }
     const handler = routes[`${req.method} ${url.pathname}`];

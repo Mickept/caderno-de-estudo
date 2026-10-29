@@ -80,6 +80,7 @@ const pageHead = (title, lead = '', actions = '', kicker = '') => `<header class
   ${actions ? `<div class="page-actions">${actions}</div>` : ''}</header>`;
 const courseName = (id) => state.courses.find((course) => course.id === id)?.name || 'Cadeira';
 const fileById = (id) => state.files.find((file) => file.id === id);
+const isViewable = (file) => /^(text\/html|video\/|audio\/)/.test(file.mime || '');
 const isPdf = (file) => file.mime === 'application/pdf' || /\.pdf$/i.test(file.filename || '');
 const materialHref = (id, page) => `/material?id=${encodeURIComponent(id)}${page ? `#page=${page}` : ''}`;
 const materialStatus = (file) => file.text_status === 'ok'
@@ -91,8 +92,8 @@ const materialStatus = (file) => file.text_status === 'ok'
 
 // PDFs abrem no visualizador do Caderno; os outros formatos abrem no programa do Windows.
 function openButton(file, label = '', className = 'button') {
-  if (state.desktop && file && !isPdf(file)) return `<button class="${className}" data-open-file="${file.id}">${label || 'Abrir no Windows'}</button>`;
-  return `<a class="${className}" href="${materialHref(file?.id)}" target="_blank" rel="noopener">${label || (file && !isPdf(file) ? 'Descarregar' : 'Abrir PDF')}</a>`;
+  if (state.desktop && file && !isPdf(file) && !isViewable(file)) return `<button class="${className}" data-open-file="${file.id}">${label || 'Abrir no Windows'}</button>`;
+  return `<a class="${className}" href="${materialHref(file?.id)}" target="_blank" rel="noopener">${label || (file && isViewable(file) ? 'Abrir' : file && !isPdf(file) ? 'Descarregar' : 'Abrir PDF')}</a>`;
 }
 // Markdown simples das respostas da IA. O texto é escapado antes de qualquer marcação.
 function md(text, citations = []) {
@@ -244,7 +245,7 @@ function today() {
           : `<p class="empty">${plan.minutes === 0 ? 'Hoje marcaste um dia sem estudo. O plano retoma quando houver tempo.' : plan.totalMaterials ? 'Está tudo em dia. Aproveita para descansar ou rever umas cartas.' : 'Adiciona materiais às cadeiras para veres o plano.'}</p>`}
         <p class="panel-foot">O plano ajusta-se ao que fizeste. Dias sem estudo não criam tarefas em atraso.</p></section>
       <div class="today-side">
-        <section class="panel"><h2>Próximos prazos</h2>${upcoming.length ? `<ul class="dates">${upcoming.map((deadline) => `<li>${dayLabel(deadline.due_at)}<div><strong>${esc(deadline.title)}</strong><span class="meta">${esc(courseName(deadline.course_id))}</span></div></li>`).join('')}</ul>`
+        <section class="panel"><h2>Próximos prazos</h2>${upcoming.length ? `<ul class="dates">${upcoming.map((deadline) => `<li>${dayLabel(deadline.due_at)}<div><strong>${esc(deadline.title)}</strong><span class="meta">${esc(courseName(deadline.course_id))}${deadline.source === 'puc' ? ' · lido do PUC, confirma a data' : ''}</span>${deadline.note ? `<span class="meta" title="${esc(deadline.note)}">${esc(deadline.note.slice(0, 110))}</span>` : ''}</div></li>`).join('')}</ul>`
           : '<p class="empty-inline">Sem prazos registados. Adiciona as datas de exame em Cadeiras.</p>'}</section>
         <section class="panel"><div class="panel-head"><h2>O que mudou</h2>${recent.length ? '<button class="link-button" data-action="seen">Marcar como visto</button>' : ''}</div>
           ${recent.length ? `<ul class="changes">${recent.map((file) => `<li><button class="title-button" data-file="${file.id}">${esc(file.filename)}</button><span class="meta">${esc(courseName(file.course_id))} · ${fmt(file.changed_at)}</span></li>`).join('')}</ul>`
@@ -317,6 +318,19 @@ function courses() {
       <div class="stack">${moodlePanel()}${manualPanel()}</div></div>`);
 }
 
+// Agrupa por pasta do Moodle (1, 1.1, ...) pela ordem numérica; ficheiros sem pasta ficam no fim.
+function groupBySection(list) {
+  const key = (value) => String(value || '').split('/').map((part) => part.match(/^[\d.]+/)?.[0].split('.').map((n) => String(n).padStart(4, '0')).join('.') || '9999').join('/');
+  const groups = new Map();
+  for (const file of [...list].sort((a, b) => (a.section_path ? key(a.section_path) : '~').localeCompare(b.section_path ? key(b.section_path) : '~') ||
+      String(a.item_number || '').localeCompare(String(b.item_number || ''), undefined, { numeric: true }))) {
+    const path = file.section_path || '';
+    if (!groups.has(path)) groups.set(path, []);
+    groups.get(path).push(file);
+  }
+  return [...groups.entries()];
+}
+
 function files() {
   const courses = state.courses.filter((course) => course.selected);
   const course = courses.find((item) => item.id === selectedCourse) || courses[0];
@@ -330,12 +344,12 @@ function files() {
       ${files.length ? `<div class="filters"><label>Procurar<input id="file-search" type="search" placeholder="Nome ou resumo" value="${esc(fileSearch)}"></label>
         <label class="checkbox-label"><input id="favorites-only" type="checkbox" ${favoritesOnly ? 'checked' : ''}>Só favoritos</label></div>
         <p id="materials-no-results" class="empty-inline" hidden>Nenhum material corresponde à pesquisa.</p>
-        <ul class="materials">${files.map((file) => `<li class="material-item" data-favorite="${file.favorite ? 'true' : 'false'}">
-          <div class="material-title"><button class="title-button" data-file="${file.id}">${esc(file.filename)}</button>
+        <div class="materials-tree">${groupBySection(files).map(([path, group]) => `${path ? `<h3 class="section-path" style="margin-left:${(path.split('/').length - 1) * 14}px">${esc(path.split('/').pop())}</h3>` : ''}<ul class="materials">${group.map((file) => `<li class="material-item" data-favorite="${file.favorite ? 'true' : 'false'}">
+          <div class="material-title"><button class="title-button" data-file="${file.id}">${file.item_number ? `${esc(file.item_number)} · ` : ''}${esc(file.filename)}</button>
             <button class="favorite-button" data-favorite-file="${file.id}" data-favorite="${file.favorite ? 'true' : 'false'}" aria-label="${file.favorite ? 'Retirar' : 'Adicionar'} ${esc(file.filename)} ${file.favorite ? 'dos' : 'aos'} favoritos" aria-pressed="${Boolean(file.favorite)}">${file.favorite ? '★' : '☆'}</button></div>
           <p class="meta">${Math.max(1, Math.round(file.size / 1024))} kB · ${file.source === 'upload' ? 'Enviado por ti' : 'Moodle'} · ${esc(materialStatus(file))}</p>
           ${file.summary ? `<p class="muted">${esc(file.summary)}</p>` : ''}
-          <div class="row">${openButton(file, '', 'button small')}</div></li>`).join('')}</ul>`
+          <div class="row">${openButton(file, '', 'button small')}</div></li>`).join('')}</ul>`).join('')}</div>`
         : `<p class="empty">${state.sync?.status === 'running' ? 'A importar os materiais desta cadeira…' : 'Ainda não há materiais nesta cadeira.'}</p>${course.source === 'moodle' && state.sync?.status !== 'running' ? '<button class="primary" data-action="sync">Importar do Moodle</button>' : ''}`}</section>
     <div class="stack"><section class="panel"><h2>Enviar material</h2><p class="muted">Apontamentos teus ou ficheiros que não estão no Moodle.</p>
       <form id="upload-form"><label class="file-input"><span>Escolher ficheiro</span><input name="file" type="file" accept=".pdf,.docx,.pptx,.xlsx,.odt,.odp,.ods,.doc,.ppt,.xls,.txt,.md,.csv,.rtf,.epub,.zip" required><small data-selected-file>Nenhum ficheiro escolhido</small></label><button class="primary">Enviar</button></form>

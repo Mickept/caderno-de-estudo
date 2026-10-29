@@ -1,5 +1,5 @@
-appId: pt.caderno.desktop
-productName: Caderno
+appId: pt.estudo.offline
+productName: Caderno de Estudo
 directories:
   output: release
 files:
@@ -15,7 +15,13 @@ win:
     - target: nsis
       arch:
         - x64
-  artifactName: Caderno-${version}-Windows-${arch}.${ext}
+  artifactName: CadernoDeEstudo-${version}-Windows-${arch}.${ext}
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+  category: Education
+  artifactName: CadernoDeEstudo-${version}-Linux-${arch}.${ext}
 # Imagens em build/, geradas por scripts/installer-art.mjs.
 nsis:
   oneClick: false
@@ -32,9 +38,4 @@ nsis:
   installerSidebar: build/installerSidebar.bmp
   uninstallerSidebar: build/installerSidebar.bmp
   installerHeader: build/installerHeader.bmp
-# Gera latest.yml e app-update.yml para as atualizações automáticas (electron-updater).
-# O upload é feito pelo workflow Windows desktop, não pelo electron-builder.
-publish:
-  provider: github
-  owner: miguelaopt
-  repo: caderno
+# Sem canal de atualizações automáticas neste fork (o do projeto original não deve ser usado).
