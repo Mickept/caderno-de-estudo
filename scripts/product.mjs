@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pendingAlerts, acknowledgeAlerts } from '../lib/deadlines.mjs';
 import { createServer } from 'node:http';
 import { createReadStream } from 'node:fs';
 import { readFile, rm, stat, writeFile } from 'node:fs/promises';
@@ -162,7 +163,7 @@ function state(user) {
     materialsDir: desktop ? resolve(PRODUCT_FILES_DIR) : undefined, dataDir: desktop ? dirname(resolve(PRODUCT_DB_PATH)) : undefined, onboarded: !!preference?.onboarded_at,
     analysis: { pending: Number(pendingAnalysis), running: activeAnalysis.has(user.id) },
     ai: { configured: aiConfigured(db, user.id), settings: aiSettings(db, user.id), consented: !!preference?.ai_consent_at },
-    plan: dailyPlan(db, user.id), changesSince: preference?.last_seen_at || null };
+    alerts: pendingAlerts(db, user.id), plan: dailyPlan(db, user.id), changesSince: preference?.last_seen_at || null };
 }
 
 // Contas com SSO (entrada pela página da instituição, Microsoft ou Google) não têm palavra-passe
@@ -399,6 +400,12 @@ const routes = {
     const parsed = data.date ? Date.parse(`${data.date}T12:00:00Z`) : null;
     if (data.date && (!/^\d{4}-\d{2}-\d{2}$/.test(data.date) || !Number.isFinite(parsed))) throw new Error('Data de exame inválida.');
     db.prepare('UPDATE courses SET exam_at=? WHERE id=? AND user_id=?').run(parsed ? Math.floor(parsed / 1000) : null, data.courseId, user.id);
+    send(res, { ok: true });
+  },
+  'POST /api/alerts/ack': async (req, res) => {
+    const user = requireUser(req);
+    const data = await jsonBody(req);
+    acknowledgeAlerts(db, user.id, Array.isArray(data.ids) ? data.ids.slice(0, 100).map(String) : []);
     send(res, { ok: true });
   },
   'POST /api/seen': async (req, res) => {

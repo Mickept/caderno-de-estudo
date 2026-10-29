@@ -10,6 +10,13 @@ Fork de https://github.com/miguelaopt/caderno (ver LICENSE, mantida) para a UAB 
 - **PUC**: procura o PUC (livro, página, PDF), lê as datas de e-fólios, trabalhos, testes e exames/avaliação global e cria prazos
   marcados "lido do PUC, confirma a data" (aparecem em Hoje → Próximos prazos).
 
+## Fase 2: avisos automáticos
+- A cada sincronização (ao ligar, manualmente e de 6 em 6 horas) lê o **calendário do Moodle** de cada cadeira escolhida
+  (`core_calendar_get_action_events_by_course_by_timesort`): testes, mini-testes, e-fólios, exames e entregas.
+  Se o Moodle da UAB não autorizar essa função, os prazos continuam a vir das atividades e do PUC.
+- Avisa quando aparece um **prazo novo** e depois a **7 dias, 48 horas e no próprio dia**. Os avisos ficam em *Hoje* até carregares em "Percebi" e saem também como notificação do sistema.
+- A primeira sincronização de uma cadeira não avisa de tudo de uma vez. A app reavalia os avisos de 15 em 15 minutos enquanto estiver aberta (as notificações precisam da app aberta).
+
 ## Executar
     npm ci
     npm start                      # abre http://localhost:<porta> (indica MOODLE_URL=https://elearning.uab.pt)
@@ -18,8 +25,7 @@ Fork de https://github.com/miguelaopt/caderno (ver LICENSE, mantida) para a UAB 
     npm run desktop:dist:linux     # AppImage (corre no Linux)
     npm test
 
-## Próximas fases
-2. Avisos automáticos (calendário e notificações do Moodle: testes, mini-testes, e-fólios novos).
+## Próximas fases (a fase 2 já está feita)
 3. Resumos e apontamentos por cadeira, também para páginas/livros (já são analisados como os PDFs).
 4. Conversa com o Claude sobre a matéria. Usa a chave de API do utilizador (a do Caderno), que é separada da subscrição Claude.ai.
 

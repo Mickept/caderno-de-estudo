@@ -12,6 +12,7 @@ process.env.APP_SECRET ||= 'segredo-de-teste-com-tamanho-suficiente-123456';
 const token = 'tok123';
 const html = (s) => Buffer.from(`<html><body>${s}</body></html>`);
 const pucHtml = html('<h2>Plano da Unidade Curricular 2026/2027</h2><h3>9. Avaliação</h3><p>e-fólio A: de 10 a 17 de novembro</p><p>Prova de avaliação global: 28 de janeiro de 2027</p>');
+let calendarEvents = [];
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   if (url.pathname.startsWith('/webservice/pluginfile.php/')) {
@@ -26,7 +27,8 @@ const server = createServer(async (req, res) => {
   res.setHeader('content-type', 'application/json');
   const f = (n) => `${base}/webservice/pluginfile.php/1/${n}`;
   if (params.get('wsfunction') === 'core_webservice_get_site_info')
-    return res.end(JSON.stringify({ userid: 1, functions: ['core_webservice_get_site_info', 'core_enrol_get_users_courses', 'core_course_get_contents'].map((name) => ({ name })) }));
+    return res.end(JSON.stringify({ userid: 1, functions: ['core_webservice_get_site_info', 'core_enrol_get_users_courses', 'core_course_get_contents', 'core_calendar_get_action_events_by_course_by_timesort'].map((name) => ({ name })) }));
+  if (params.get('wsfunction') === 'core_calendar_get_action_events_by_course_by_timesort') return res.end(JSON.stringify({ events: calendarEvents }));
   res.end(JSON.stringify([
     { id: 1, section: 0, name: 'Apresentação', modules: [{ id: 10, modname: 'page', name: 'Plano da Unidade Curricular (PUC)', contents: [{ type: 'file', filename: 'puc.html', fileurl: f('puc.html'), timemodified: 5 }] }] },
     { id: 2, section: 1, name: 'Tema 1 - Introdução', modules: [{ id: 20, modname: 'subsection', instance: 9, name: 'Recursos' }, { id: 21, modname: 'resource', name: 'Aula', contents: [{ type: 'file', filename: 'aula.mp4', fileurl: f('aula.mp4'), timemodified: 7 }] }] },
@@ -58,8 +60,26 @@ try {
   const dl = db.prepare("SELECT kind,source,note,due_at FROM deadlines WHERE source='puc' ORDER BY due_at").all();
   assert.deepEqual(dl.map((d) => d.kind), ['efolio', 'exame']);
   assert.ok(dl[0].note.includes('Confirma no PUC'));
+  const soon = Math.floor(Date.now() / 1000) + 5 * 86400;
+  const { pendingAlerts, acknowledgeAlerts, stageFor } = await import('./lib/deadlines.mjs');
+  assert.equal(pendingAlerts(db, 'u').length, 0, 'primeira sincronização não inunda de avisos');
+  calendarEvents = [
+    { id: 1, name: 'Mini-teste 1', modulename: 'quiz', eventtype: 'close', timesort: soon, url: `${base}/mod/quiz/view.php?id=77` },
+    { id: 2, name: 'e-fólio A', modulename: 'assign', eventtype: 'due', timesort: soon + 86400, url: `${base}/mod/assign/view.php?id=78` },
+    { id: 3, name: 'Abertura do teste', modulename: 'quiz', eventtype: 'open', timesort: soon, url: `${base}/mod/quiz/view.php?id=77` }];
   await syncUser(db, 'u'); // idempotente
+  const alerts = pendingAlerts(db, 'u');
+  assert.deepEqual(alerts.filter((a) => a.reason === 'novo').map((a) => a.kind).sort(), ['efolio', 'teste']);
+  acknowledgeAlerts(db, 'u', alerts.map((a) => a.id));
+  assert.equal(pendingAlerts(db, 'u').length, 0, 'depois de dispensados não voltam a aparecer');
+  await syncUser(db, 'u');
+  assert.equal(pendingAlerts(db, 'u').length, 0, 'nova sincronização não repete avisos');
+  const first = db.prepare("SELECT id,due_at FROM deadlines WHERE kind='teste'").get();
+  db.prepare('UPDATE deadlines SET due_at=? WHERE id=?').run(Math.floor(Date.now() / 1000) + 3600, first.id);
+  assert.equal(stageFor(Math.floor(Date.now() / 1000) + 3600), 3);
+  assert.equal(pendingAlerts(db, 'u')[0].reason, 'é hoje', 'lembrete quando o prazo se aproxima');
   assert.equal(db.prepare('SELECT count(*) n FROM files').get().n, 3);
   assert.equal(db.prepare("SELECT count(*) n FROM deadlines WHERE source='puc'").get().n, 2);
+  assert.equal(db.prepare("SELECT count(*) n FROM deadlines WHERE kind='teste'").get().n, 1, 'evento "open" ignorado');
   console.log('test-mirror ok');
 } finally { server.close(); }

@@ -55,8 +55,34 @@ async function api(path, options = {}) {
 }
 const post = (path, data) => api(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
 
+// Avisos de prazos: ficam visíveis em Hoje até serem dispensados e geram notificação do sistema uma vez.
+const KIND_NAMES = { exame: 'Exame', efolio: 'e-fólio', teste: 'Teste', trabalho: 'Trabalho', entrega: 'Entrega' };
+const sessionAlerts = new Map();
+const notified = new Set();
+function collectAlerts() {
+  for (const alert of state?.alerts || []) sessionAlerts.set(alert.id, alert);
+  const fresh = (state?.alerts || []).filter((alert) => !notified.has(`${alert.id}:${alert.stage}`));
+  if (!fresh.length || !('Notification' in window)) return;
+  const show = () => {
+    for (const alert of fresh) {
+      notified.add(`${alert.id}:${alert.stage}`);
+      const when = new Date(alert.due_at * 1000).toLocaleString('pt-PT', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+      try { new Notification(`${KIND_NAMES[alert.kind] || 'Prazo'}: ${alert.reason}`, { body: `${alert.title} · ${when}`, tag: `${alert.id}:${alert.stage}` }); } catch { /* sem notificações */ }
+    }
+  };
+  if (Notification.permission === 'granted') show();
+  else if (Notification.permission === 'default') Notification.requestPermission().then((result) => { if (result === 'granted') show(); }).catch(() => {});
+}
+const alertsBanner = () => {
+  const alerts = [...sessionAlerts.values()].filter((alert) => state.deadlines.some((deadline) => deadline.id === alert.id) || alert.due_at > Date.now() / 1000)
+    .sort((a, b) => a.due_at - b.due_at);
+  return alerts.length ? `<section class="notice alerts" role="alert"><h2>Avisos</h2><ul>${alerts.map((alert) => `<li><strong>${esc(KIND_NAMES[alert.kind] || 'Prazo')}: ${esc(alert.reason)}</strong> ${esc(alert.title)}
+    <span class="meta">${esc(courseName(alert.course_id))} · ${new Date(alert.due_at * 1000).toLocaleString('pt-PT', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}${alert.source === 'puc' ? ' · lido do PUC, confirma' : ''}</span></li>`).join('')}</ul>
+    <button data-action="dismiss-alerts">Percebi</button></section>` : '';
+};
+
 async function refresh() {
-  try { state = await api('/api/state'); }
+  try { state = await api('/api/state'); collectAlerts(); }
   catch (error) { if (error.message.includes('Inicia sessão')) state = null; else throw error; }
   render();
   clearTimeout(syncPoll);
@@ -165,6 +191,10 @@ setInterval(() => {
     element.textContent = seconds >= 2 ? `${seconds} s` : '';
   }
 }, 1000);
+// Reavalia os avisos de prazos com a app aberta (fases 7 dias / 48 h / hoje).
+setInterval(() => {
+  if (state && !document.activeElement?.matches('input,textarea,select')) refresh().catch(() => {});
+}, 15 * 60 * 1000);
 const analyzing = (id) => busy.has(`analyze:${id}`);
 const summaryLoading = (id) => loadingBlock('A ler o PDF e a criar o resumo, os conceitos e as perguntas. Costuma demorar 10 a 40 segundos.', `analyze:${id}`, 4);
 
@@ -226,6 +256,7 @@ function today() {
   const date = new Date().toLocaleDateString('pt-PT', { weekday: 'long', day: 'numeric', month: 'long' });
   shell(`${pageHead('Hoje', `${plan.studiedToday} de ${plan.minutes} min feitos · ${plan.completed} de ${plan.totalMaterials} materiais em dia`,
     state.connection ? '<button data-action="sync">Sincronizar Moodle</button>' : '', date)}
+    ${alertsBanner()}
     ${syncNotice('A importar materiais do Moodle e a extrair o texto dos PDFs. Os ficheiros aparecem quando estiverem prontos.')}
     ${state.connection?.last_error ? `<p class="notice error" role="alert">${esc(state.connection.last_error)}</p>` : ''}
     ${state.connection && selected.length && !state.files.length && state.sync?.status !== 'running' ? '<div class="notice"><p><strong>As cadeiras estão ligadas, mas ainda não há ficheiros.</strong> Importa os materiais do Moodle para criar o plano.</p><button class="primary" data-action="sync">Importar do Moodle</button></div>' : ''}
@@ -765,6 +796,8 @@ async function action(target) {
     target.disabled = true; flash('A sincronizar com o Moodle…');
     try { const result = await post('/api/sync', {}); flash(result.status === 'running' ? 'Sincronização em curso.' : result.warning || `${result.newCount} ficheiros novos ou alterados.`); await refresh(); }
     finally { target.disabled = false; }
+  } else if (name === 'dismiss-alerts') {
+    await post('/api/alerts/ack', { ids: [...sessionAlerts.keys()] }); sessionAlerts.clear(); await refresh();
   } else if (name === 'seen') {
     await post('/api/seen', {}); await refresh();
   } else if (name === 'reveal') {
