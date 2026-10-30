@@ -229,7 +229,7 @@ function auth() {
 /** @type {[string, [string, string][]][]} */
 const navigation = [
   ['Organizar', [['today', 'Hoje'], ['courses', 'Cadeiras'], ['files', 'Materiais'], ['notes', 'Apontamentos']]],
-  ['Estudar', [['explain', 'Explicações'], ['cards', 'Flashcards'], ['practice', 'Treino'], ['revision', 'Revisão'], ['exam', 'Simulado'], ['focus', 'Foco']]],
+  ['Estudar', [['chat', 'Conversa'], ['explain', 'Explicações'], ['cards', 'Flashcards'], ['practice', 'Treino'], ['revision', 'Revisão'], ['exam', 'Simulado'], ['focus', 'Foco']]],
 ];
 const navButton = (id, label) => `<button data-screen="${id}" ${screen === id || (id === 'files' && screen === 'detail') ? 'aria-current="page"' : ''}>${label}</button>`;
 
@@ -360,6 +360,37 @@ function groupBySection(list) {
     groups.get(path).push(file);
   }
   return [...groups.entries()];
+}
+
+// Conversa contínua com o tutor da cadeira (materiais, apontamentos e prazos como contexto).
+let chatMessages = [];
+let chatLoadedFor = null;
+async function loadChat(courseId) {
+  chatLoadedFor = courseId;
+  try { chatMessages = (await api(`/api/chat?courseId=${encodeURIComponent(courseId)}`)).messages; }
+  catch (error) { chatMessages = []; flash(error.message); }
+  render();
+  document.querySelector('.chat-log')?.scrollTo(0, 1e9);
+}
+function chat() {
+  const courses = state.courses.filter((course) => course.selected);
+  const course = courses.find((item) => item.id === selectedCourse) || courses[0];
+  selectedCourse = course?.id || null;
+  if (course && chatLoadedFor !== course.id) loadChat(course.id);
+  const canAi = state.ai?.consented && state.ai?.configured;
+  const picker = course ? `<label class="inline-select">Cadeira<select id="chat-course">${courses.map((c) => `<option value="${c.id}" ${c.id === selectedCourse ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>` : '';
+  shell(`${pageHead('Conversa', 'Fala com o tutor da cadeira. Responde com base nos teus materiais, apontamentos e prazos.', picker)}
+    ${!course ? '<div class="notice"><p><strong>Escolhe primeiro uma cadeira.</strong></p><button class="primary" data-screen="courses">Adicionar cadeiras</button></div>'
+    : !canAi ? '<div class="notice"><p><strong>Falta configurar a IA.</strong> Nas Definições, ativa a análise e põe a tua chave (Claude/Anthropic, OpenAI…).</p><button class="primary" data-screen="settings">Abrir Definições</button></div>'
+    : `<section class="panel chat"><div class="chat-log" aria-live="polite">${chatMessages.length ? chatMessages.map((message) => message.role === 'user'
+        ? `<div class="chat-msg user"><p>${esc(message.content).replace(/\n/g, '<br>')}</p></div>`
+        : `<div class="chat-msg assistant prose">${md(message.content, message.citations)}${citationsHtml({ citations: message.citations })}</div>`).join('')
+        : '<p class="empty">Pergunta o que quiseres sobre a matéria. Por exemplo: «Explica o conceito principal do tema 2» ou «O que devo rever antes do e-fólio?».</p>'}
+      ${busy.has('chat') ? loadingBlock('O tutor está a pensar…', 'chat', 2) : ''}</div>
+      <form id="chat-form" class="row"><label class="grow">Mensagem<textarea name="message" rows="2" required minlength="2" maxlength="2000" placeholder="Escreve a tua dúvida…"></textarea></label>
+        <button class="primary">Enviar</button></form>
+      ${chatMessages.length ? '<button class="link-button" data-action="chat-clear">Limpar conversa</button>' : ''}</section>`}`);
+  document.querySelector('.chat-log')?.scrollTo(0, 1e9);
 }
 
 // Apontamentos: notas do aluno e resumos por tema (criados à mão ou pela IA).
@@ -797,6 +828,7 @@ function render() {
   if (screen === 'files') return files();
   if (screen === 'notes') return notes();
   if (screen === 'detail') return detail();
+  if (screen === 'chat') return chat();
   if (screen === 'explain') return explanations();
   if (screen === 'cards') return cards();
   if (screen === 'practice') return practice();
@@ -831,6 +863,9 @@ async function action(target) {
     finally { target.disabled = false; }
   } else if (name === 'dismiss-alerts') {
     await post('/api/alerts/ack', { ids: [...sessionAlerts.keys()] }); sessionAlerts.clear(); await refresh();
+  } else if (name === 'chat-clear') {
+    if (!confirm('Apagar esta conversa?')) return;
+    await post('/api/chat/clear', { courseId: selectedCourse }); chatMessages = []; render();
   } else if (name === 'note-new') {
     selectedNote = 'new'; render();
   } else if (name === 'note-delete') {
@@ -1065,6 +1100,14 @@ document.addEventListener('submit', async (event) => {
       flash('Chave guardada. A testar…');
       try { await post('/api/ai-test', {}); flash('Chave guardada e testada: a IA está a responder.'); }
       catch (error) { flash(`Chave guardada, mas o teste falhou. ${error.message}`); }
+    } else if (form.id === 'chat-form') {
+      const message = String(data.get('message') || '').trim();
+      if (!message) return;
+      chatMessages.push({ role: 'user', content: message, citations: [] });
+      await whileBusy('chat', async () => {
+        try { chatMessages.push(await post('/api/chat', { courseId: selectedCourse, message })); }
+        catch (error) { chatMessages.pop(); throw error; }
+      });
     } else if (form.id === 'note-form') {
       const result = await post('/api/notes', { id: data.get('id') || null, courseId: selectedCourse, title: data.get('title'), body: data.get('body'), sectionPath: data.get('sectionPath') || null });
       selectedNote = result.id; await refresh(); flash('Apontamento guardado.');
@@ -1122,7 +1165,7 @@ document.addEventListener('change', async (event) => {
       if (input instanceof HTMLInputElement) input.placeholder = value || 'ID do modelo';
     }
   }
-  if (event.target instanceof HTMLSelectElement && (event.target.id === 'file-course' || event.target.id === 'note-course')) { selectedCourse = event.target.value; selectedNote = null; render(); }
+  if (event.target instanceof HTMLSelectElement && (event.target.id === 'file-course' || event.target.id === 'note-course' || event.target.id === 'chat-course')) { selectedCourse = event.target.value; selectedNote = null; render(); }
   if (event.target instanceof HTMLSelectElement && event.target.id === 'explain-course') {
     explanationCourse = event.target.value; explanationFile = null; explanationAnswer = null; explanationError = null; render();
   }

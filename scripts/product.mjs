@@ -10,7 +10,7 @@ import { id, hash, passwordHash, passwordMatches, encryptToken, newSession, sess
 import { assertFunctions, storeFile, supportedDocument, syncUser } from '../lib/product-sync.mjs';
 import { dailyPlan } from '../lib/product-plan.mjs';
 import { saveNote, deleteNote, listNotes } from '../lib/notes.mjs';
-import { analyzeFile, askCourse, summarizeSection } from '../lib/product-ai.mjs';
+import { analyzeFile, askCourse, summarizeSection, chatCourse, chatHistory, clearChat } from '../lib/product-ai.mjs';
 import { aiSettings, aiConfigured, saveAiSettings, deleteAiSettings, testAi } from '../lib/product-ai-provider.mjs';
 import { callWs, baseUrl, loginWithPassword, nomeLimpo, startSsoLogin, tokenFromSsoUrl } from '../lib/moodle.mjs';
 
@@ -402,6 +402,22 @@ const routes = {
     if (data.date && (!/^\d{4}-\d{2}-\d{2}$/.test(data.date) || !Number.isFinite(parsed))) throw new Error('Data de exame inválida.');
     db.prepare('UPDATE courses SET exam_at=? WHERE id=? AND user_id=?').run(parsed ? Math.floor(parsed / 1000) : null, data.courseId, user.id);
     send(res, { ok: true });
+  },
+  'GET /api/chat': async (req, res, url) => {
+    const user = requireUser(req);
+    const course = ownCourse(user.id, url.searchParams.get('courseId'));
+    send(res, { messages: chatHistory(db, user.id, course.id) });
+  },
+  'POST /api/chat': async (req, res) => {
+    const user = requireUser(req);
+    const data = await jsonBody(req);
+    send(res, await queueAi(user.id, () => chatCourse(db, user.id, data.courseId, data.message)));
+  },
+  'POST /api/chat/clear': async (req, res) => {
+    const user = requireUser(req);
+    const data = await jsonBody(req);
+    ownCourse(user.id, data.courseId);
+    send(res, { removed: clearChat(db, user.id, data.courseId) });
   },
   'POST /api/notes': async (req, res) => {
     const user = requireUser(req);

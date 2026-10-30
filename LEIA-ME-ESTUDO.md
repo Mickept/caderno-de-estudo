@@ -22,6 +22,11 @@ Fork de https://github.com/miguelaopt/caderno (ver LICENSE, mantida) para a UAB 
 - **Resumir um tema com IA**: escolhes um tema (ou subtema) e a IA lê os materiais dele e escreve ideias principais, conceitos, o que não esquecer e perguntas para te testares. Fica guardado como apontamento editável.
 - Precisa de chave de IA nas Definições (Anthropic/Claude, OpenAI, DeepSeek, Groq...). É uma chave de API, diferente da subscrição Claude.ai.
 
+## Fase 4: conversa com o Claude
+- Página **Conversa** (em Estudar): um chat contínuo por cadeira, com histórico guardado.
+- Cada resposta usa os excertos mais relevantes dos teus materiais (com ligação à página), os teus apontamentos e os próximos prazos da cadeira, mais as últimas trocas da conversa.
+- Escolhe o fornecedor nas Definições. Para usar o Claude, escolhe Anthropic e põe uma chave de API de console.anthropic.com (paga por utilização, separada da subscrição Claude.ai).
+
 ## Instalar no Windows
 Ver INSTALAR-WINDOWS.md.
 
@@ -33,7 +38,6 @@ Ver INSTALAR-WINDOWS.md.
     npm run desktop:dist:linux     # AppImage (corre no Linux)
     npm test
 
-## Próximas fases (fases 1, 2 e 3 feitas)
-4. Conversa com o Claude sobre a matéria. Usa a chave de API do utilizador (a do Caderno), que é separada da subscrição Claude.ai.
+## Próximas fases (fases 1 a 4 feitas)
 
 Não testado contra o Moodle real da UAB; o PUC deve ser sempre confirmado.

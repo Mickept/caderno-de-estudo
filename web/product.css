@@ -393,3 +393,8 @@ button[aria-busy=true]::after{content:"";width:12px;height:12px;border:2px solid
 .section-path{margin:18px 0 0;font-size:.95rem;color:var(--muted,inherit);font-family:inherit}
 
 .alerts{border-left:4px solid var(--gold,#c9a227)}.alerts ul{list-style:none;margin:8px 0;padding:0;display:grid;gap:8px}.alerts .meta{display:block}
+
+.chat-log{display:grid;gap:12px;max-height:60vh;overflow:auto;padding:4px 2px 12px}
+.chat-msg{max-width:46rem;padding:10px 14px;border-radius:14px;border:1px solid var(--line)}
+.chat-msg.user{justify-self:end;background:color-mix(in srgb,var(--gold,#c9a227) 14%,transparent)}
+.chat-msg.assistant{justify-self:start}.chat .grow{flex:1}.chat textarea{width:100%}

@@ -102,6 +102,23 @@ try {
     assert.equal(listNotes(db, 'u').find((n) => n.id === summary.id).kind, 'resumo');
     await assert.rejects(() => summarizeSection(db, 'u', 'c1', '7 - Inexistente'), /ainda não tem materiais/);
   } finally { globalThis.fetch = realFetch; }
+  // Conversa por cadeira
+  const { chatCourse, chatHistory, clearChat } = await import('./lib/product-ai.mjs');
+  db.prepare("UPDATE files SET pages_json=? WHERE item_number='1.1.1'").run(JSON.stringify(['A normalização reduz redundância nas tabelas relacionais.']));
+  saveNote(db, 'u', { courseId: 'c1', title: 'Normalização', body: 'Lembrar as formas normais' });
+  let chatPrompt = '';
+  globalThis.fetch = async (url, options) => { if (String(url).includes('openai')) { chatPrompt = JSON.parse(options.body).input;
+    return new Response(JSON.stringify({ output_text: 'Reduz redundância [1] (apontamento: Normalização).', usage: {} }), { status: 200 }); } return realFetch(url, options); };
+  try {
+    const reply = await chatCourse(db, 'u', 'c1', 'O que é a normalização?');
+    assert.ok(JSON.stringify(chatPrompt).includes('redundância nas tabelas') && JSON.stringify(chatPrompt).includes('Lembrar as formas normais'), 'contexto: materiais e apontamentos');
+    assert.deepEqual(reply.citations.map((c) => c.page), [1]);
+    await chatCourse(db, 'u', 'c1', 'E as formas normais?');
+    assert.ok(JSON.stringify(chatPrompt).includes('O que é a normalização?'), 'o histórico segue no pedido seguinte');
+    assert.equal(chatHistory(db, 'u', 'c1').length, 4);
+    await assert.rejects(() => chatCourse(db, 'u', 'outra', 'olá'), /não encontrada/);
+    assert.equal(clearChat(db, 'u', 'c1'), 4);
+  } finally { globalThis.fetch = realFetch; }
   assert.equal(deleteNote(db, 'u', noteId), true);
   console.log('test-mirror ok');
 } finally { server.close(); }
