@@ -54,7 +54,7 @@ try {
   assert.deepEqual(files.map((x) => [x.item_number, x.section_path]),
     [['0.1', '0 - Apresentação'], ['1.1.1', '1 - Tema 1 - Introdução/1.1 - Recursos'], ['1.2', '1 - Tema 1 - Introdução']]);
   assert.ok(files.every((x) => existsSync(x.path)));
-  assert.ok(files[1].path.includes('/1 - Tema 1 - Introdução/1.1 - Recursos/'), 'pastas reais no disco');
+  assert.ok(files[1].path.replaceAll('\\', '/').includes('/1 - Tema 1 - Introdução/1.1 - Recursos/'), 'pastas reais no disco');
   const book = readFileSync(files[1].path, 'utf8');
   assert.ok(book.includes('data:image/png;base64') && !book.includes('<script'), 'imagens embebidas e sem scripts');
   const dl = db.prepare("SELECT kind,source,note,due_at FROM deadlines WHERE source='puc' ORDER BY due_at").all();

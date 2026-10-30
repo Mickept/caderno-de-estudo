@@ -20,7 +20,17 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run typecheck
-      - run: npm test
+      - name: npm test
+        shell: pwsh
+        run: |
+          npm test *> test.log
+          $code = $LASTEXITCODE
+          if ($code) {
+            $tail = (Get-Content test.log -Tail 25 | ForEach-Object { $_ -replace '[\r\n%]', ' ' }) -join ' | '
+            Write-Host "::error title=npm test falhou::$tail"
+            Get-Content test.log -Tail 60
+            exit $code
+          }
       - name: Confirmar versão da tag
         if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
