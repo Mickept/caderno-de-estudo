@@ -108,6 +108,7 @@ const courseName = (id) => state.courses.find((course) => course.id === id)?.nam
 const fileById = (id) => state.files.find((file) => file.id === id);
 const isViewable = (file) => /^(text\/html|video\/|audio\/)/.test(file.mime || '');
 const isPdf = (file) => file.mime === 'application/pdf' || /\.pdf$/i.test(file.filename || '');
+const shownName = (name) => String(name || '').replace(/\.html?$/i, '');
 const materialHref = (id, page) => `/material?id=${encodeURIComponent(id)}${page ? `#page=${page}` : ''}`;
 const materialStatus = (file) => file.text_status === 'ok'
   ? `${file.page_count || 0} páginas de texto${file.summary ? ' · resumo pronto' : ' · sem resumo'}`
@@ -474,20 +475,20 @@ function detail() {
   const file = fileDetail;
   const canAsk = file.text_status === 'ok' && state.ai?.consented && state.ai?.configured;
   shell(`<button class="link-button back" data-screen="files">← Materiais</button>
-    ${pageHead(esc(file.filename), esc(courseName(file.course_id)), `<button data-favorite-file="${file.id}" data-favorite="${file.favorite ? 'true' : 'false'}" aria-pressed="${Boolean(file.favorite)}">${file.favorite ? '★ Nos favoritos' : '☆ Favorito'}</button>${revealButton(file)}${openButton(file, '', 'button primary')}`)}
+    ${pageHead(esc(shownName(file.filename)), esc(courseName(file.course_id)), `<button data-favorite-file="${file.id}" data-favorite="${file.favorite ? 'true' : 'false'}" aria-pressed="${Boolean(file.favorite)}">${file.favorite ? '★ Nos favoritos' : '☆ Favorito'}</button>${revealButton(file)}${openButton(file, '', 'button primary')}`)}
     ${file.text_status === 'privado' ? '<p class="notice error">Este ficheiro parece conter dados de pessoas e está excluído da análise por IA.</p>' : ''}
     ${file.text_status === 'vazio' ? '<p class="notice">Este PDF não tem texto selecionável. Pode ser uma digitalização que precisa de OCR.</p>' : ''}
     ${file.text_status === 'falhou' ? '<p class="notice error">Falhou a extração de texto. Tenta sincronizar novamente ou abre o PDF para estudar diretamente.</p>' : ''}
     ${file.text_status === 'sem-extracao' ? `<p class="notice">Este documento está guardado na pasta da cadeira. ${state.desktop ? 'Usa Abrir no Windows para o abrir com o programa do computador.' : 'Descarrega-o para o abrir.'} A extração de texto e a IA só existem para PDFs.</p>` : ''}
     <section class="panel summary-panel"><div class="panel-head"><h2>Resumo</h2>
       ${canAsk && file.summary ? `<div class="row tight"><button class="small" data-explain-file="${file.id}">Pedir uma explicação</button><button class="small" data-analyze="${file.id}" data-force="true" ${analyzing(file.id) ? 'disabled' : ''}>Refazer resumo</button></div>` : ''}</div>
-      ${analyzing(file.id) ? summaryLoading(file.id) : file.summary ? digest(file) : `<p class="muted">${isPdf(file) ? 'Ainda não há resumo. O PDF continua disponível para estudar.' : 'Este formato não tem resumo automático.'}</p>
-        ${canAsk ? `<p class="hint">O resumo traz o essencial do PDF, os conceitos com definição e perguntas para o Treino e os Flashcards.</p><button class="primary" data-analyze="${file.id}">Criar resumo com IA</button>` : ''}`}
+      ${analyzing(file.id) ? summaryLoading(file.id) : file.summary ? digest(file) : `<p class="muted">${file.text_status === 'ok' ? 'Ainda não há resumo deste material.' : isPdf(file) ? 'Ainda não há resumo. O PDF continua disponível para estudar.' : 'Este formato não tem resumo automático.'}</p>
+        ${canAsk ? `<p class="hint">O resumo traz o essencial do material, os conceitos com definição e perguntas para o Treino e os Flashcards.</p><button class="primary" data-analyze="${file.id}">Criar resumo com IA</button>` : ''}`}
       ${file.text_preview && file.text_status === 'ok' ? `<details class="extracted-text"><summary>Ver texto extraído (${file.page_count || 0} páginas)</summary><pre>${esc(file.text_preview)}${file.text_preview.length >= 8000 ? '\n…' : ''}</pre></details>` : ''}</section>
     <div class="split"><section class="panel"><h2>Praticar</h2>${file.questions?.length ? `<p class="muted">Tenta responder antes de abrires a resposta.</p><div class="questions">${file.questions.map((question, index) => `<details><summary>${esc(question.pergunta)}</summary><p><strong>Resposta:</strong> ${esc(question.resposta)}</p>
         ${question.explicacao ? `<p class="muted">${esc(question.explicacao)}</p>` : ''}
         <div class="row"><button data-quiz="${file.id}" data-index="${index}" data-correct="false">Preciso de rever</button><button data-quiz="${file.id}" data-index="${index}" data-correct="true">Consegui</button></div></details>`).join('')}</div>` : '<p class="empty-inline">As perguntas aparecem depois de criares o resumo com IA.</p>'}</section>
-      <section class="panel"><h2>Perguntar a este PDF</h2>${canAsk ? `<form id="detail-ask-form"><label>A tua dúvida<textarea name="question" rows="3" required minlength="4" maxlength="1000" placeholder="Ex.: Porque é que esta regra é necessária?"></textarea></label>
+      <section class="panel"><h2>Perguntar a este material</h2>${canAsk ? `<form id="detail-ask-form"><label>A tua dúvida<textarea name="question" rows="3" required minlength="4" maxlength="1000" placeholder="Ex.: Porque é que esta regra é necessária?"></textarea></label>
         <button class="primary" ${busy.has('detail-ask') ? 'disabled' : ''}>Perguntar</button></form>
         ${busy.has('detail-ask') ? loadingBlock('A ler as páginas deste PDF e a preparar a resposta…', 'detail-ask') : answer ? answerHtml(answer) : '<p class="hint">A resposta usa só este PDF e indica as páginas. Para resumos por partes, glossários ou exemplos, usa Explicações.</p>'}`
         : '<p class="hint">Configura e autoriza a IA nas Definições para fazer perguntas sobre este PDF.</p>'}</section></div>`);
